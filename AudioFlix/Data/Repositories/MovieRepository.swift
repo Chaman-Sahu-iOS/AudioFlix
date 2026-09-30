@@ -29,17 +29,35 @@ protocol MovieRepositoryProtocol {
 
 final class MovieRepository: MovieRepositoryProtocol {
 
-    private let remoteDataSource: RemoteMovieDataSourceProtocol
-    private let cache: MovieCache
+    private let remoteDataSource:
+            RemoteMovieDataSourceProtocol
 
-    // 10 minutes
-    private let cacheMaxAge: TimeInterval = 60 * 10
+        // Optional: nil when the local SwiftData store failed to open.
+        private let localDataSource:
+            LocalMovieDataSourceProtocol?
+
+        private let cache: MovieCache
+
+        private let cacheMaxAge:
+            TimeInterval = 60 * 10
+
 
     init(
-        remoteDataSource: RemoteMovieDataSourceProtocol,
+        remoteDataSource:
+            RemoteMovieDataSourceProtocol,
+
+        localDataSource:
+            LocalMovieDataSourceProtocol?,
+
         cache: MovieCache
     ) {
-        self.remoteDataSource = remoteDataSource
+
+        self.remoteDataSource =
+            remoteDataSource
+
+        self.localDataSource =
+            localDataSource
+
         self.cache = cache
     }
 
@@ -48,29 +66,55 @@ final class MovieRepository: MovieRepositoryProtocol {
         page: Int
     ) async throws -> MovieSearchResponse {
 
-        // 1. Check valid cache
-        if let cachedResponse = await cache.get(
+        // 1. Memory cache
+        if let cached = await cache.get(
             query: query,
             page: page,
             maxAge: cacheMaxAge
         ) {
-            return cachedResponse
+            return cached
         }
 
-        // 2. Cache miss / expired
-        let response = try await remoteDataSource.searchMovies(
+        // 2. Local persistence (skipped when the store is unavailable)
+        let localMovies =
+            try localDataSource?.movies(
+                query: query,
+                page: page
+            ) ?? []
+
+        if !localMovies.isEmpty {
+
+            let response =
+                MovieSearchResponse(
+                    search: localMovies,
+                    totalResults: nil,
+                    response: "True"
+                )
+
+            return response
+        }
+
+        // 3. Network
+        let response =
+            try await remoteDataSource.searchMovies(
+                query: query,
+                page: page
+            )
+
+        // 4. Save locally
+        try localDataSource?.save(
+            movies: response.search ?? [],
             query: query,
             page: page
         )
 
-        // 3. Update cache
+        // 5. Save memory cache
         await cache.save(
             response: response,
             query: query,
             page: page
         )
 
-        // 4. Return fresh response
         return response
     }
 }

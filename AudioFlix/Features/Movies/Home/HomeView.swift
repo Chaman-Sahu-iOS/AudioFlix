@@ -29,14 +29,19 @@ struct HomeView: View {
 
         let apiService = APIService()
 
+    
+        let cache = MovieCache()
+        
+        // Opening the SwiftData store can fail; fall back to
+        // network + memory cache only rather than crashing.
+        let localDataSource = try? LocalMovieDataSource()
+
         let remoteDataSource = RemoteMovieDataSource(
             apiService: apiService
         )
 
-        let cache = MovieCache()
-
         let repository = MovieRepository(
-            remoteDataSource: remoteDataSource,
+            remoteDataSource: remoteDataSource, localDataSource: localDataSource,
             cache: cache
         )
 
