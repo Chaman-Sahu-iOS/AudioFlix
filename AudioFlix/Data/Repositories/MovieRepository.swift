@@ -20,7 +20,11 @@
 import Foundation
 
 protocol MovieRepositoryProtocol {
-    func searchMovies(query: String) async throws -> [Movie]
+
+    func searchMovies(
+        query: String,
+        page: Int
+    ) async throws -> MovieSearchResponse
 }
 
 final class MovieRepository: MovieRepositoryProtocol {
@@ -38,24 +42,43 @@ final class MovieRepository: MovieRepositoryProtocol {
         self.cache = cache
     }
 
-    func searchMovies(query: String) async throws -> [Movie] {
+    func searchMovies(
+        query: String,
+        page: Int
+    ) async throws -> MovieSearchResponse {
 
-        if let cachedMovies = cache.movies(
-            for: query,
-            maxAge: cacheMaxAge
-        ) {
-            return cachedMovies
-        }
+//        if let cachedMovies = cache.movies(
+//            for: query,
+//            maxAge: cacheMaxAge
+//        ) {
+//            return cachedMovies
+//        }
 
-        let movies = try await remoteDataSource.searchMovies(
-            query: query
-        )
+//        let movies = try await remoteDataSource.searchMovies(
+//            query: query, page: page
+//        )
 
-        cache.save(
-            movies: movies,
-            for: query
-        )
+//        cache.save(
+//            movies: movies,
+//            for: query
+//        )
 
-        return movies
+        if let cachedMovies = await cache.movies(
+                  for: "\(query)-\(page)"
+              ) {
+                  // Return cached response
+              }
+
+              let response = try await remoteDataSource.searchMovies(
+                  query: query,
+                  page: page
+              )
+
+              await cache.save(
+                  movies: response.search ?? [],
+                  for: "\(query)-\(page)"
+              )
+
+              return response
     }
 }

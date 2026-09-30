@@ -20,18 +20,31 @@
 import Foundation
 
 protocol RemoteMovieDataSourceProtocol {
-    func searchMovies(query: String) async throws -> [Movie]
+    func searchMovies(
+        query: String,
+        page: Int
+    ) async throws -> MovieSearchResponse
 }
 
-final class RemoteMovieDataSource: RemoteMovieDataSourceProtocol {
+final class RemoteMovieDataSource:
+    RemoteMovieDataSourceProtocol {
 
     private let apiService: APIService
 
-    init(apiService: APIService = APIService()) {
+    init(
+        apiService: APIService = APIService()
+    ) {
         self.apiService = apiService
     }
 
-    func searchMovies(query: String) async throws -> [Movie] {
-        try await apiService.searchMovies(query: query)
+    func searchMovies(
+        query: String,
+        page: Int
+    ) async throws -> MovieSearchResponse {
+
+        try await apiService.searchMovies(
+            query: query,
+            page: page
+        )
     }
 }

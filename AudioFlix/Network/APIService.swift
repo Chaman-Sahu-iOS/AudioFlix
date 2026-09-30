@@ -21,7 +21,10 @@ import Foundation
 
 final class APIService {
 
-    func searchMovies(query: String) async throws -> [Movie] {
+    func searchMovies(
+        query: String,
+        page: Int
+    ) async throws -> MovieSearchResponse {
 
         guard var components = URLComponents(
             string: APIConfig.baseURL
@@ -30,8 +33,18 @@ final class APIService {
         }
 
         components.queryItems = [
-            URLQueryItem(name: "apikey", value: APIConfig.apiKey),
-            URLQueryItem(name: "s", value: query)
+            URLQueryItem(
+                name: "apikey",
+                value: APIConfig.apiKey
+            ),
+            URLQueryItem(
+                name: "s",
+                value: query
+            ),
+            URLQueryItem(
+                name: "page",
+                value: String(page)
+            )
         ]
 
         guard let url = components.url else {
@@ -59,7 +72,7 @@ final class APIService {
                 )
             }
 
-            return result.search ?? []
+            return result
 
         } catch let error as APIError {
             throw error

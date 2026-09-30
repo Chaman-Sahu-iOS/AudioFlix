@@ -31,6 +31,11 @@ final class HomeViewModel: ObservableObject {
     private var searchTask: Task<Void, Never>?
 
     private let repository: MovieRepositoryProtocol
+    
+    private var currentPage = 0
+    private var totalResults = 0
+    private var currentQuery = ""
+    private var isLoadingNextPage = false
 
     init(
         repository: MovieRepositoryProtocol
@@ -41,6 +46,10 @@ final class HomeViewModel: ObservableObject {
     func searchMovies(query: String) {
 
         searchTask?.cancel()
+
+        currentQuery = query
+        currentPage = 0
+        movies = []
 
         searchTask = Task {
 
@@ -54,18 +63,72 @@ final class HomeViewModel: ObservableObject {
                 }
 
                 isLoading = true
-                errorMessage = nil
 
-                movies = try await repository.searchMovies(
-                    query: query
+                let response = try await repository.searchMovies(
+                    query: query,
+                    page: 1
                 )
+
+                guard !Task.isCancelled else {
+                    return
+                }
+
+                movies = response.search ?? []
+
+                currentPage = 1
+                totalResults = Int(
+                    response.totalResults ?? "0"
+                ) ?? 0
 
                 isLoading = false
 
             } catch is CancellationError {
-                // Expected when user continues typing.
+                // Expected.
             } catch {
                 isLoading = false
+                errorMessage = error.localizedDescription
+            }
+        }
+    }
+    
+    func loadNextPage() {
+
+        guard !isLoadingNextPage else {
+            return
+        }
+
+        let nextPage = currentPage + 1
+
+        guard movies.count < totalResults else {
+            return
+        }
+
+        isLoadingNextPage = true
+
+        Task {
+
+            do {
+
+                let response = try await repository.searchMovies(
+                    query: currentQuery,
+                    page: nextPage
+                )
+
+                guard !Task.isCancelled else {
+                    return
+                }
+
+                let newMovies = response.search ?? []
+
+                movies.append(contentsOf: newMovies)
+
+                currentPage = nextPage
+
+                isLoadingNextPage = false
+
+            } catch {
+
+                isLoadingNextPage = false
                 errorMessage = error.localizedDescription
             }
         }

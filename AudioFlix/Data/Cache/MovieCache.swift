@@ -1,5 +1,5 @@
 //
-//  MemoryCache.swift
+//  MovieCache.swift
 //  AudioFlix
 //
 //  Copyright 2026 Chaman Lal Sahu
@@ -21,7 +21,9 @@ import Foundation
 
 
 
-final class CacheObject: NSObject {
+/// Opted out of the module's main-actor default isolation so it can be
+/// created and stored from inside the `MovieCache` actor.
+nonisolated final class CacheObject: NSObject {
 
     let movies: [Movie]
     let cachedAt: Date
@@ -36,7 +38,7 @@ final class CacheObject: NSObject {
 }
 
 
-final class MovieCache {
+actor MovieCache {
 
     private let cache = NSCache<NSString, CacheObject>()
 
