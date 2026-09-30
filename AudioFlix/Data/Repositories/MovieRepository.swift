@@ -28,6 +28,8 @@ final class MovieRepository: MovieRepositoryProtocol {
     private let remoteDataSource: RemoteMovieDataSourceProtocol
     private let cache: MovieCache
 
+    private let cacheMaxAge: TimeInterval = 60 * 10
+
     init(
         remoteDataSource: RemoteMovieDataSourceProtocol,
         cache: MovieCache
@@ -38,23 +40,22 @@ final class MovieRepository: MovieRepositoryProtocol {
 
     func searchMovies(query: String) async throws -> [Movie] {
 
-        // 1. Check cache
-        if let cachedMovies = cache.movies(for: query) {
+        if let cachedMovies = cache.movies(
+            for: query,
+            maxAge: cacheMaxAge
+        ) {
             return cachedMovies
         }
 
-        // 2. Fetch from remote
         let movies = try await remoteDataSource.searchMovies(
             query: query
         )
 
-        // 3. Save response in cache
         cache.save(
             movies: movies,
             for: query
         )
 
-        // 4. Return data
         return movies
     }
 }

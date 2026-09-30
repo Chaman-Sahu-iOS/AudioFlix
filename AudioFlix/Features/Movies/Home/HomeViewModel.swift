@@ -21,43 +21,53 @@ import Foundation
 import SwiftUI
 import Combine
 
-protocol MovieRepositoryProtocol {
-    func searchMovies(query: String) async throws -> [Movie]
-}
+@MainActor
+final class HomeViewModel: ObservableObject {
 
-final class MovieRepository: MovieRepositoryProtocol {
+    @Published private(set) var movies: [Movie] = []
+    @Published private(set) var isLoading = false
+    @Published var errorMessage: String?
+    
+    private var searchTask: Task<Void, Never>?
 
-    private let remoteDataSource: RemoteMovieDataSourceProtocol
-    private let cache: MovieCache
-
-    private let cacheMaxAge: TimeInterval = 60 * 10
+    private let repository: MovieRepositoryProtocol
 
     init(
-        remoteDataSource: RemoteMovieDataSourceProtocol,
-        cache: MovieCache
+        repository: MovieRepositoryProtocol
     ) {
-        self.remoteDataSource = remoteDataSource
-        self.cache = cache
+        self.repository = repository
     }
 
-    func searchMovies(query: String) async throws -> [Movie] {
+    func searchMovies(query: String) {
 
-        if let cachedMovies = cache.movies(
-            for: query,
-            maxAge: cacheMaxAge
-        ) {
-            return cachedMovies
+        searchTask?.cancel()
+
+        searchTask = Task {
+
+            do {
+                try await Task.sleep(
+                    for: .milliseconds(400)
+                )
+
+                guard !Task.isCancelled else {
+                    return
+                }
+
+                isLoading = true
+                errorMessage = nil
+
+                movies = try await repository.searchMovies(
+                    query: query
+                )
+
+                isLoading = false
+
+            } catch is CancellationError {
+                // Expected when user continues typing.
+            } catch {
+                isLoading = false
+                errorMessage = error.localizedDescription
+            }
         }
-
-        let movies = try await remoteDataSource.searchMovies(
-            query: query
-        )
-
-        cache.save(
-            movies: movies,
-            for: query
-        )
-
-        return movies
     }
 }
