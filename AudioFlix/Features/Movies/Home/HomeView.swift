@@ -58,15 +58,9 @@ struct HomeView: View {
                         
                         HStack(spacing: 12) {
                             
-                            AsyncImage(
+                            CachedAsyncImage(
                                 url: URL(string: movie.poster)
-                            ) { image in
-                                image
-                                    .resizable()
-                                    .scaledToFill()
-                            } placeholder: {
-                                ProgressView()
-                            }
+                            )
                             .frame(
                                 width: 70,
                                 height: 100

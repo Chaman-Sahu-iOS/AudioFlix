@@ -64,7 +64,7 @@ final class MovieRepository: MovieRepositoryProtocol {
 //        )
 
         if let cachedMovies = await cache.movies(
-                  for: "\(query)-\(page)"
+            for: "\(query)-\(page)", maxAge: cacheMaxAge
               ) {
                   // Return cached response
               }
