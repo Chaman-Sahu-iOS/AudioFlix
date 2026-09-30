@@ -11,6 +11,9 @@ Pods/
 .build/
 .swiftpm/
 
+# Secrets
+AudioFlix/Network/APIConfig.swift
+
 # Misc
 *.DS_Store
 *.ipa
