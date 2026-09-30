@@ -16,13 +16,13 @@ enum ImageDownsampler {
         scale: CGFloat
     ) -> UIImage? {
 
-        let sourceOptions = [
+        let sourceOptions: [CFString: Any] = [
             kCGImageSourceShouldCache: false
-        ] as CFDictionary
+        ]
 
         guard let source = CGImageSourceCreateWithData(
             data as CFData,
-            sourceOptions
+            sourceOptions as CFDictionary
         ) else {
             return nil
         }
@@ -32,23 +32,25 @@ enum ImageDownsampler {
             pointSize.height
         ) * scale
 
-        let options = [
+        let thumbnailOptions: [CFString: Any] = [
             kCGImageSourceCreateThumbnailFromImageAlways: true,
             kCGImageSourceShouldCacheImmediately: true,
             kCGImageSourceCreateThumbnailWithTransform: true,
             kCGImageSourceThumbnailMaxPixelSize: maxDimension
-        ] as CFDictionary
+        ]
 
-        guard let cgImage = CGImageSourceCreateThumbnailAtIndex(
+        guard let image = CGImageSourceCreateThumbnailAtIndex(
             source,
             0,
-            options
+            thumbnailOptions as CFDictionary
         ) else {
             return nil
         }
 
         return UIImage(
-            cgImage: cgImage
+            cgImage: image,
+            scale: scale,
+            orientation: .up
         )
     }
 }

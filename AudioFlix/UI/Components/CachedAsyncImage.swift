@@ -10,6 +10,9 @@ import SwiftUI
 struct CachedAsyncImage: View {
 
     let url: URL?
+    let size: CGSize
+
+    @Environment(\.displayScale) private var displayScale
 
     @State private var image: UIImage?
     @State private var isLoading = false
@@ -19,21 +22,30 @@ struct CachedAsyncImage: View {
         Group {
 
             if let image {
+
                 Image(uiImage: image)
                     .resizable()
                     .scaledToFill()
 
             } else if isLoading {
+
                 ProgressView()
 
             } else {
+
                 Rectangle()
+                    .fill(.quaternary)
                     .overlay {
+
                         Image(systemName: "photo")
+                            .foregroundStyle(
+                                .secondary
+                            )
                     }
             }
         }
         .task(id: url) {
+
             await loadImage()
         }
     }
@@ -51,10 +63,19 @@ struct CachedAsyncImage: View {
         }
 
         do {
+
             image = try await ImageLoader.shared.image(
-                from: url
+                from: url,
+                size: size,
+                scale: displayScale
             )
+
+        } catch is CancellationError {
+
+            return
+
         } catch {
+
             image = nil
         }
     }

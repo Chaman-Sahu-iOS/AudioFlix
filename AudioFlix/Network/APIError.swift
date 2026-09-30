@@ -17,10 +17,34 @@
 //  limitations under the License.
 //
 
-enum APIError: Error {
+import Foundation
+
+enum APIError: LocalizedError {
+
     case invalidURL
     case invalidResponse
     case decodingFailed
     case serverError
     case apiError(String)
+
+    var errorDescription: String? {
+
+        switch self {
+
+        case .invalidURL:
+            return "Invalid URL."
+
+        case .invalidResponse:
+            return "Invalid server response."
+
+        case .decodingFailed:
+            return "Unable to process server response."
+
+        case .serverError:
+            return "Server error."
+
+        case .apiError(let message):
+            return message
+        }
+    }
 }

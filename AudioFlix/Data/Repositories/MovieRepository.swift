@@ -32,6 +32,7 @@ final class MovieRepository: MovieRepositoryProtocol {
     private let remoteDataSource: RemoteMovieDataSourceProtocol
     private let cache: MovieCache
 
+    // 10 minutes
     private let cacheMaxAge: TimeInterval = 60 * 10
 
     init(
@@ -47,38 +48,29 @@ final class MovieRepository: MovieRepositoryProtocol {
         page: Int
     ) async throws -> MovieSearchResponse {
 
-//        if let cachedMovies = cache.movies(
-//            for: query,
-//            maxAge: cacheMaxAge
-//        ) {
-//            return cachedMovies
-//        }
+        // 1. Check valid cache
+        if let cachedResponse = await cache.get(
+            query: query,
+            page: page,
+            maxAge: cacheMaxAge
+        ) {
+            return cachedResponse
+        }
 
-//        let movies = try await remoteDataSource.searchMovies(
-//            query: query, page: page
-//        )
+        // 2. Cache miss / expired
+        let response = try await remoteDataSource.searchMovies(
+            query: query,
+            page: page
+        )
 
-//        cache.save(
-//            movies: movies,
-//            for: query
-//        )
+        // 3. Update cache
+        await cache.save(
+            response: response,
+            query: query,
+            page: page
+        )
 
-        if let cachedMovies = await cache.movies(
-            for: "\(query)-\(page)", maxAge: cacheMaxAge
-              ) {
-                  // Return cached response
-              }
-
-              let response = try await remoteDataSource.searchMovies(
-                  query: query,
-                  page: page
-              )
-
-              await cache.save(
-                  movies: response.search ?? [],
-                  for: "\(query)-\(page)"
-              )
-
-              return response
+        // 4. Return fresh response
+        return response
     }
 }

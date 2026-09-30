@@ -17,25 +17,27 @@
 //  limitations under the License.
 //
 
-import Foundation
+
 import SwiftUI
 import Combine
+import Foundation
 
 @MainActor
 final class HomeViewModel: ObservableObject {
 
     @Published private(set) var movies: [Movie] = []
     @Published private(set) var isLoading = false
+    @Published private(set) var isLoadingNextPage = false
+
     @Published var errorMessage: String?
-    
-    private var searchTask: Task<Void, Never>?
 
     private let repository: MovieRepositoryProtocol
-    
+
+    private var searchTask: Task<Void, Never>?
+
+    private var currentQuery = ""
     private var currentPage = 0
     private var totalResults = 0
-    private var currentQuery = ""
-    private var isLoadingNextPage = false
 
     init(
         repository: MovieRepositoryProtocol
@@ -43,69 +45,155 @@ final class HomeViewModel: ObservableObject {
         self.repository = repository
     }
 
+    // MARK: - Search
+
     func searchMovies(query: String) {
 
         searchTask?.cancel()
 
-        currentQuery = query
-        currentPage = 0
-        movies = []
+        let trimmedQuery = query
+            .trimmingCharacters(
+                in: .whitespacesAndNewlines
+            )
 
-        searchTask = Task {
+        guard !trimmedQuery.isEmpty else {
+
+            movies = []
+            currentQuery = ""
+            currentPage = 0
+            totalResults = 0
+
+            return
+        }
+
+        currentQuery = trimmedQuery
+        currentPage = 0
+        totalResults = 0
+        movies = []
+        errorMessage = nil
+
+        searchTask = Task { [weak self] in
 
             do {
+
+                // Debounce
                 try await Task.sleep(
                     for: .milliseconds(400)
                 )
 
-                guard !Task.isCancelled else {
+                try Task.checkCancellation()
+
+                guard let self else {
                     return
                 }
 
-                isLoading = true
-
-                let response = try await repository.searchMovies(
-                    query: query,
-                    page: 1
+                await self.loadFirstPage(
+                    query: trimmedQuery
                 )
 
-                guard !Task.isCancelled else {
+            } catch is CancellationError {
+
+                // Expected when user keeps typing.
+
+            } catch {
+
+                guard let self else {
                     return
                 }
 
-                movies = response.search ?? []
-
-                currentPage = 1
-                totalResults = Int(
-                    response.totalResults ?? "0"
-                ) ?? 0
-
-                isLoading = false
-
-            } catch is CancellationError {
-                // Expected.
-            } catch {
-                isLoading = false
-                errorMessage = error.localizedDescription
+                self.errorMessage =
+                    error.localizedDescription
             }
         }
     }
-    
-    func loadNextPage() {
+
+    // MARK: - First Page
+
+    private func loadFirstPage(
+        query: String
+    ) async {
+
+        isLoading = true
+        errorMessage = nil
+
+        defer {
+            isLoading = false
+        }
+
+        do {
+
+            let response = try await repository.searchMovies(
+                query: query,
+                page: 1
+            )
+
+            try Task.checkCancellation()
+
+            guard query == currentQuery else {
+                return
+            }
+
+            movies = response.search ?? []
+
+            currentPage = 1
+
+            totalResults = Int(
+                response.totalResults ?? "0"
+            ) ?? 0
+
+        } catch is CancellationError {
+
+            return
+
+        } catch {
+
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    // MARK: - Pagination
+
+    func loadNextPageIfNeeded(
+        currentMovie movie: Movie
+    ) {
+
+        guard !isLoading else {
+            return
+        }
 
         guard !isLoadingNextPage else {
             return
         }
 
-        let nextPage = currentPage + 1
+        guard !currentQuery.isEmpty else {
+            return
+        }
+
+        guard currentPage > 0 else {
+            return
+        }
+
+        guard movies.last?.id == movie.id else {
+            return
+        }
 
         guard movies.count < totalResults else {
             return
         }
 
+        let nextPage = currentPage + 1
+
         isLoadingNextPage = true
 
-        Task {
+        Task { [weak self] in
+
+            guard let self else {
+                return
+            }
+
+            defer {
+                self.isLoadingNextPage = false
+            }
 
             do {
 
@@ -114,23 +202,82 @@ final class HomeViewModel: ObservableObject {
                     page: nextPage
                 )
 
-                guard !Task.isCancelled else {
+                try Task.checkCancellation()
+
+                guard nextPage == currentPage + 1 else {
                     return
                 }
 
-                let newMovies = response.search ?? []
-
-                movies.append(contentsOf: newMovies)
+                movies.append(
+                    contentsOf: response.search ?? []
+                )
 
                 currentPage = nextPage
 
-                isLoadingNextPage = false
+                totalResults = Int(
+                    response.totalResults ?? "0"
+                ) ?? totalResults
+
+            } catch is CancellationError {
+
+                return
 
             } catch {
 
-                isLoadingNextPage = false
-                errorMessage = error.localizedDescription
+                errorMessage =
+                    error.localizedDescription
             }
+        }
+    }
+
+    deinit {
+        searchTask?.cancel()
+    }
+    
+    
+    func prefetchImages(
+        after movie: Movie,
+        count: Int = 5
+    ) {
+
+        guard let index = movies.firstIndex(
+            where: { $0.id == movie.id }
+        ) else {
+            return
+        }
+
+        let startIndex = index + 1
+
+        guard startIndex < movies.count else {
+            return
+        }
+
+        let endIndex = min(
+            startIndex + count,
+            movies.count
+        )
+
+        let urls = movies[
+            startIndex..<endIndex
+        ]
+        .compactMap {
+            URL(string: $0.poster)
+        }
+
+        guard !urls.isEmpty else {
+            return
+        }
+
+        Task {
+
+            await ImageLoader.shared.prefetch(
+                urls: urls,
+                size: CGSize(
+                    width: 70,
+                    height: 100
+                ),
+                scale: 2
+            )
         }
     }
 }

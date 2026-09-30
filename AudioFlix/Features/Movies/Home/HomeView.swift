@@ -20,67 +20,137 @@
 import SwiftUI
 
 struct HomeView: View {
-    
+
     @StateObject private var viewModel: HomeViewModel
-    
+
+    @State private var searchText = ""
+
     init() {
+
         let apiService = APIService()
-        
+
         let remoteDataSource = RemoteMovieDataSource(
             apiService: apiService
         )
-        
+
         let cache = MovieCache()
-        
+
         let repository = MovieRepository(
             remoteDataSource: remoteDataSource,
             cache: cache
         )
-        
+
         _viewModel = StateObject(
             wrappedValue: HomeViewModel(
                 repository: repository
             )
         )
     }
-    
+
     var body: some View {
+
         NavigationStack {
+
             Group {
-                
-                if viewModel.isLoading {
-                    
-                    ProgressView()
-                    
+
+                if viewModel.isLoading &&
+                    viewModel.movies.isEmpty {
+
+                    ProgressView("Searching...")
+
+                } else if let errorMessage =
+                            viewModel.errorMessage,
+                          viewModel.movies.isEmpty {
+
+                    ContentUnavailableView(
+                        "Something went wrong",
+                        systemImage: "exclamationmark.triangle",
+                        description: Text(errorMessage)
+                    )
+
                 } else {
-                    
-                    List(viewModel.movies) { movie in
-                        
-                        HStack(spacing: 12) {
-                            
-                            CachedAsyncImage(
-                                url: URL(string: movie.poster)
-                            )
-                            .frame(
-                                width: 70,
-                                height: 100
-                            )
-                            .clipped()
-                            
-                            VStack(alignment: .leading) {
-                                Text(movie.title)
-                                    .font(.headline)
-                                
-                                Text(movie.year)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                    }
+
+                    movieList
                 }
             }
-            .navigationTitle("Movies")
-            .task {
-                viewModel.searchMovies(query: "Batman")
+            .navigationTitle("AudioFlix")
+            .searchable(
+                text: $searchText,
+                prompt: "Search movies"
+            )
+            .onChange(of: searchText) { _, newValue in
+
+                viewModel.searchMovies(
+                    query: newValue
+                )
+            }
+        }
+    }
+
+    private var movieList: some View {
+
+        List(viewModel.movies) { movie in
+
+            HStack(spacing: 12) {
+
+                CachedAsyncImage(
+                    url: URL(
+                        string: movie.poster
+                    ),
+                    size: CGSize(
+                        width: 70,
+                        height: 100
+                    )
+                )
+                .frame(
+                    width: 70,
+                    height: 100
+                )
+                .clipped()
+                .clipShape(
+                    RoundedRectangle(
+                        cornerRadius: 8
+                    )
+                )
+
+                VStack(
+                    alignment: .leading,
+                    spacing: 6
+                ) {
+
+                    Text(movie.title)
+                        .font(.headline)
+
+                    Text(movie.year)
+                        .foregroundStyle(
+                            .secondary
+                        )
+                }
+
+                Spacer()
+            }
+            .onAppear {
+
+                viewModel.loadNextPageIfNeeded(
+                    currentMovie: movie
+                )
+
+                viewModel.prefetchImages(
+                    after: movie
+                )
+            }
+        }
+        .overlay {
+
+            if viewModel.isLoadingNextPage {
+
+                VStack {
+
+                    Spacer()
+
+                    ProgressView()
+                        .padding()
+                }
             }
         }
     }

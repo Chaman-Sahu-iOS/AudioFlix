@@ -55,28 +55,40 @@ final class APIService {
             from: url
         )
 
-        guard let httpResponse = response as? HTTPURLResponse,
-              200..<300 ~= httpResponse.statusCode else {
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw APIError.invalidResponse
+        }
+
+        guard 200..<300 ~= httpResponse.statusCode else {
+
+            if httpResponse.statusCode >= 500 {
+                throw APIError.serverError
+            }
+
             throw APIError.invalidResponse
         }
 
         do {
+
             let result = try JSONDecoder().decode(
                 MovieSearchResponse.self,
                 from: data
             )
 
-            if result.response == "False" {
+            guard result.response == "True" else {
                 throw APIError.apiError(
-                    "No movies found"
+                    "No movies found."
                 )
             }
 
             return result
 
         } catch let error as APIError {
+
             throw error
+
         } catch {
+
             throw APIError.decodingFailed
         }
     }

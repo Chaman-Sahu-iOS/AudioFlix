@@ -19,51 +19,59 @@
 
 import Foundation
 
+private final class MovieCacheObject: NSObject {
 
-
-/// Opted out of the module's main-actor default isolation so it can be
-/// created and stored from inside the `MovieCache` actor.
-nonisolated final class CacheObject: NSObject {
-
-    let movies: [Movie]
+    let response: MovieSearchResponse
     let cachedAt: Date
 
     init(
-        movies: [Movie],
+        response: MovieSearchResponse,
         cachedAt: Date
     ) {
-        self.movies = movies
+        self.response = response
         self.cachedAt = cachedAt
     }
 }
 
-
 actor MovieCache {
 
-    private let cache = NSCache<NSString, CacheObject>()
+    private let cache = NSCache<NSString, MovieCacheObject>()
 
     func save(
-        movies: [Movie],
-        for query: String
+        response: MovieSearchResponse,
+        query: String,
+        page: Int
     ) {
-        let object = CacheObject(
-            movies: movies,
+
+        let key = cacheKey(
+            query: query,
+            page: page
+        )
+
+        let object = MovieCacheObject(
+            response: response,
             cachedAt: Date()
         )
 
         cache.setObject(
             object,
-            forKey: query as NSString
+            forKey: key as NSString
         )
     }
 
-    func movies(
-        for query: String,
+    func get(
+        query: String,
+        page: Int,
         maxAge: TimeInterval
-    ) -> [Movie]? {
+    ) -> MovieSearchResponse? {
+
+        let key = cacheKey(
+            query: query,
+            page: page
+        )
 
         guard let object = cache.object(
-            forKey: query as NSString
+            forKey: key as NSString
         ) else {
             return nil
         }
@@ -72,17 +80,27 @@ actor MovieCache {
             object.cachedAt
         )
 
-        guard age < maxAge else {
+        if age > maxAge {
+
             cache.removeObject(
-                forKey: query as NSString
+                forKey: key as NSString
             )
+
             return nil
         }
 
-        return object.movies
+        return object.response
     }
 
     func removeAll() {
         cache.removeAllObjects()
+    }
+
+    private func cacheKey(
+        query: String,
+        page: Int
+    ) -> String {
+
+        "\(query.lowercased().trimmingCharacters(in: .whitespacesAndNewlines))_page_\(page)"
     }
 }
