@@ -22,34 +22,44 @@ import SwiftUI
 struct HomeView: View {
 
     @StateObject private var viewModel: HomeViewModel
-
     @State private var searchText = ""
 
     init() {
 
         let apiService = APIService()
 
-    
-        let cache = MovieCache()
-        
-        // Opening the SwiftData store can fail; fall back to
-        // network + memory cache only rather than crashing.
-        let localDataSource = try? LocalMovieDataSource()
-
-        let remoteDataSource = RemoteMovieDataSource(
-            apiService: apiService
-        )
-
-        let repository = MovieRepository(
-            remoteDataSource: remoteDataSource, localDataSource: localDataSource,
-            cache: cache
-        )
-
-        _viewModel = StateObject(
-            wrappedValue: HomeViewModel(
-                repository: repository
+        let remoteDataSource =
+            RemoteMovieDataSource(
+                apiService: apiService
             )
-        )
+
+        let cache = MovieCache()
+
+        do {
+
+            let localDataSource =
+                try LocalMovieDataSource()
+
+            let repository =
+                MovieRepository(
+                    remoteDataSource: remoteDataSource,
+                    localDataSource: localDataSource,
+                    cache: cache
+                )
+
+            _viewModel = StateObject(
+                wrappedValue:
+                    HomeViewModel(
+                        repository: repository
+                    )
+            )
+
+        } catch {
+
+            fatalError(
+                "Failed to initialize local storage: \(error)"
+            )
+        }
     }
 
     var body: some View {
@@ -69,8 +79,10 @@ struct HomeView: View {
 
                     ContentUnavailableView(
                         "Something went wrong",
-                        systemImage: "exclamationmark.triangle",
-                        description: Text(errorMessage)
+                        systemImage:
+                            "exclamationmark.triangle",
+                        description:
+                            Text(errorMessage)
                     )
 
                 } else {
@@ -83,11 +95,36 @@ struct HomeView: View {
                 text: $searchText,
                 prompt: "Search movies"
             )
-            .onChange(of: searchText) { _, newValue in
+            .onChange(
+                of: searchText
+            ) { _, newValue in
 
                 viewModel.searchMovies(
                     query: newValue
                 )
+            }
+            .overlay(alignment: .top) {
+
+                if viewModel.isOfflineData {
+
+                    Text("Showing saved results")
+                        .font(.caption)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(.thinMaterial)
+                        .clipShape(
+                            Capsule()
+                        )
+                        .padding(.top, 8)
+                }
+            }
+            .overlay(alignment: .topTrailing) {
+
+                if viewModel.isRefreshing {
+
+                    ProgressView()
+                        .padding()
+                }
             }
         }
     }
@@ -136,13 +173,15 @@ struct HomeView: View {
             }
             .onAppear {
 
-                viewModel.loadNextPageIfNeeded(
-                    currentMovie: movie
-                )
+                viewModel
+                    .loadNextPageIfNeeded(
+                        currentMovie: movie
+                    )
 
-                viewModel.prefetchImages(
-                    after: movie
-                )
+                viewModel
+                    .prefetchImages(
+                        after: movie
+                    )
             }
         }
         .overlay {

@@ -12,16 +12,16 @@ import SwiftData
 final class MovieEntity {
 
     @Attribute(.unique)
-    var imdbID: String
+    var cacheKey: String
 
+    var imdbID: String
     var title: String
     var year: String
     var poster: String
 
     var query: String
     var page: Int
-
-    var savedAt: Date
+    var position: Int
 
     init(
         imdbID: String,
@@ -30,7 +30,7 @@ final class MovieEntity {
         poster: String,
         query: String,
         page: Int,
-        savedAt: Date = Date()
+        position: Int
     ) {
         self.imdbID = imdbID
         self.title = title
@@ -38,6 +38,9 @@ final class MovieEntity {
         self.poster = poster
         self.query = query
         self.page = page
-        self.savedAt = savedAt
+        self.position = position
+
+        self.cacheKey =
+            "\(query.lowercased())_\(page)_\(imdbID)"
     }
 }

@@ -28,21 +28,30 @@ final class HomeViewModel: ObservableObject {
     @Published private(set) var movies: [Movie] = []
     @Published private(set) var isLoading = false
     @Published private(set) var isLoadingNextPage = false
+    @Published private(set) var isRefreshing = false
+    @Published private(set) var isOfflineData = false
 
     @Published var errorMessage: String?
 
     private let repository: MovieRepositoryProtocol
 
     private var searchTask: Task<Void, Never>?
+    private var refreshTasks: [Int: Task<Void, Never>] = [:]
 
     private var currentQuery = ""
     private var currentPage = 0
     private var totalResults = 0
 
-    init(
-        repository: MovieRepositoryProtocol
-    ) {
+    init(repository: MovieRepositoryProtocol) {
         self.repository = repository
+    }
+
+    deinit {
+        searchTask?.cancel()
+
+        for task in refreshTasks.values {
+            task.cancel()
+        }
     }
 
     // MARK: - Search
@@ -51,18 +60,11 @@ final class HomeViewModel: ObservableObject {
 
         searchTask?.cancel()
 
-        let trimmedQuery = query
-            .trimmingCharacters(
-                in: .whitespacesAndNewlines
-            )
+        let trimmedQuery =
+            query.trimmingCharacters(in: .whitespacesAndNewlines)
 
         guard !trimmedQuery.isEmpty else {
-
-            movies = []
-            currentQuery = ""
-            currentPage = 0
-            totalResults = 0
-
+            reset()
             return
         }
 
@@ -71,21 +73,18 @@ final class HomeViewModel: ObservableObject {
         totalResults = 0
         movies = []
         errorMessage = nil
+        isOfflineData = false
 
         searchTask = Task { [weak self] in
 
             do {
-
-                // Debounce
                 try await Task.sleep(
                     for: .milliseconds(400)
                 )
 
                 try Task.checkCancellation()
 
-                guard let self else {
-                    return
-                }
+                guard let self else { return }
 
                 await self.loadFirstPage(
                     query: trimmedQuery
@@ -97,9 +96,7 @@ final class HomeViewModel: ObservableObject {
 
             } catch {
 
-                guard let self else {
-                    return
-                }
+                guard let self else { return }
 
                 self.errorMessage =
                     error.localizedDescription
@@ -122,10 +119,11 @@ final class HomeViewModel: ObservableObject {
 
         do {
 
-            let response = try await repository.searchMovies(
-                query: query,
-                page: 1
-            )
+            let result =
+                try await repository.searchMovies(
+                    query: query,
+                    page: 1
+                )
 
             try Task.checkCancellation()
 
@@ -133,13 +131,22 @@ final class HomeViewModel: ObservableObject {
                 return
             }
 
-            movies = response.search ?? []
+            apply(
+                response: result.response,
+                page: 1,
+                append: false
+            )
 
-            currentPage = 1
+            isOfflineData =
+                result.source == .local
 
-            totalResults = Int(
-                response.totalResults ?? "0"
-            ) ?? 0
+            // Stale-While-Revalidate
+            if result.isStale {
+                startRefresh(
+                    query: query,
+                    page: 1
+                )
+            }
 
         } catch is CancellationError {
 
@@ -147,7 +154,8 @@ final class HomeViewModel: ObservableObject {
 
         } catch {
 
-            errorMessage = error.localizedDescription
+            errorMessage =
+                error.localizedDescription
         }
     }
 
@@ -173,11 +181,25 @@ final class HomeViewModel: ObservableObject {
             return
         }
 
-        guard movies.last?.id == movie.id else {
+        guard movies.count < totalResults else {
             return
         }
 
-        guard movies.count < totalResults else {
+        guard let index =
+                movies.firstIndex(
+                    where: { $0.id == movie.id }
+                )
+        else {
+            return
+        }
+
+        // Start loading when 5 items remain.
+        let threshold = max(
+            movies.count - 5,
+            0
+        )
+
+        guard index >= threshold else {
             return
         }
 
@@ -197,26 +219,36 @@ final class HomeViewModel: ObservableObject {
 
             do {
 
-                let response = try await repository.searchMovies(
-                    query: currentQuery,
-                    page: nextPage
-                )
+                let result =
+                    try await repository.searchMovies(
+                        query: currentQuery,
+                        page: nextPage
+                    )
 
                 try Task.checkCancellation()
 
-                guard nextPage == currentPage + 1 else {
+                guard nextPage ==
+                        currentPage + 1
+                else {
                     return
                 }
 
-                movies.append(
-                    contentsOf: response.search ?? []
+                apply(
+                    response: result.response,
+                    page: nextPage,
+                    append: true
                 )
 
-                currentPage = nextPage
+                if result.source == .local {
+                    isOfflineData = true
+                }
 
-                totalResults = Int(
-                    response.totalResults ?? "0"
-                ) ?? totalResults
+                if result.isStale {
+                    startRefresh(
+                        query: currentQuery,
+                        page: nextPage
+                    )
+                }
 
             } catch is CancellationError {
 
@@ -230,19 +262,150 @@ final class HomeViewModel: ObservableObject {
         }
     }
 
-    deinit {
-        searchTask?.cancel()
+    // MARK: - Refresh
+
+    private func startRefresh(
+        query: String,
+        page: Int
+    ) {
+
+        refreshTasks[page]?.cancel()
+
+        refreshTasks[page] = Task { [weak self] in
+
+            guard let self else {
+                return
+            }
+
+            do {
+
+                if page == 1 {
+                    isRefreshing = true
+                }
+
+                let result =
+                    try await repository.refreshMovies(
+                        query: query,
+                        page: page
+                    )
+
+                try Task.checkCancellation()
+
+                guard query == currentQuery else {
+                    return
+                }
+
+                if page == 1 {
+
+                    apply(
+                        response: result.response,
+                        page: page,
+                        append: false
+                    )
+
+                    isOfflineData = false
+
+                } else {
+
+                    replacePage(
+                        response: result.response,
+                        page: page
+                    )
+                }
+
+            } catch is CancellationError {
+
+                return
+
+            } catch {
+
+                // Stale/local data is still usable.
+                // Don't replace the UI with an error
+                // just because background refresh failed.
+
+            }
+
+            if page == 1 {
+                isRefreshing = false
+            }
+
+            refreshTasks[page] = nil
+        }
     }
-    
-    
+
+    // MARK: - Apply Response
+
+    private func apply(
+        response: MovieSearchResponse,
+        page: Int,
+        append: Bool
+    ) {
+
+        let newMovies =
+            response.search ?? []
+
+        if append {
+            movies.append(contentsOf: newMovies)
+        } else {
+            movies = newMovies
+        }
+
+        currentPage = page
+
+        totalResults =
+            Int(response.totalResults ?? "0")
+            ?? totalResults
+    }
+
+    // MARK: - Replace Refreshed Page
+
+    private func replacePage(
+        response: MovieSearchResponse,
+        page: Int
+    ) {
+
+        guard page > 0 else {
+            return
+        }
+
+        let newMovies =
+            response.search ?? []
+
+        let startIndex =
+            (page - 1) * 10
+
+        guard startIndex < movies.count else {
+            return
+        }
+
+        let endIndex =
+            min(
+                startIndex + 10,
+                movies.count
+            )
+
+        movies.replaceSubrange(
+            startIndex..<endIndex,
+            with: newMovies
+        )
+
+        totalResults =
+            Int(response.totalResults ?? "0")
+            ?? totalResults
+    }
+
+    // MARK: - Images
+
     func prefetchImages(
         after movie: Movie,
         count: Int = 5
     ) {
 
-        guard let index = movies.firstIndex(
-            where: { $0.id == movie.id }
-        ) else {
+        guard let index =
+                movies.firstIndex(
+                    where: { $0.id == movie.id }
+                )
+        else {
             return
         }
 
@@ -252,24 +415,23 @@ final class HomeViewModel: ObservableObject {
             return
         }
 
-        let endIndex = min(
-            startIndex + count,
-            movies.count
-        )
+        let endIndex =
+            min(
+                startIndex + count,
+                movies.count
+            )
 
-        let urls = movies[
-            startIndex..<endIndex
-        ]
-        .compactMap {
-            URL(string: $0.poster)
-        }
+        let urls =
+            movies[startIndex..<endIndex]
+                .compactMap {
+                    URL(string: $0.poster)
+                }
 
         guard !urls.isEmpty else {
             return
         }
 
         Task {
-
             await ImageLoader.shared.prefetch(
                 urls: urls,
                 size: CGSize(
@@ -279,5 +441,26 @@ final class HomeViewModel: ObservableObject {
                 scale: 2
             )
         }
+    }
+
+    // MARK: - Reset
+
+    private func reset() {
+
+        currentQuery = ""
+        currentPage = 0
+        totalResults = 0
+
+        movies = []
+
+        errorMessage = nil
+        isOfflineData = false
+        isRefreshing = false
+
+        for task in refreshTasks.values {
+            task.cancel()
+        }
+
+        refreshTasks.removeAll()
     }
 }

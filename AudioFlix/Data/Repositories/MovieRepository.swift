@@ -19,102 +19,150 @@
 
 import Foundation
 
-protocol MovieRepositoryProtocol {
+enum MovieDataSource {
+    case memory
+    case local
+    case remote
+}
 
+struct MovieRepositoryResult {
+    let response: MovieSearchResponse
+    let source: MovieDataSource
+    let isStale: Bool
+}
+
+protocol MovieRepositoryProtocol {
     func searchMovies(
         query: String,
         page: Int
-    ) async throws -> MovieSearchResponse
+    ) async throws -> MovieRepositoryResult
+
+    func refreshMovies(
+        query: String,
+        page: Int
+    ) async throws -> MovieRepositoryResult
 }
 
+@MainActor
 final class MovieRepository: MovieRepositoryProtocol {
 
-    private let remoteDataSource:
-            RemoteMovieDataSourceProtocol
+    private let remoteDataSource: RemoteMovieDataSourceProtocol
+    private let localDataSource: LocalMovieDataSourceProtocol
+    private let cache: MovieCache
 
-        // Optional: nil when the local SwiftData store failed to open.
-        private let localDataSource:
-            LocalMovieDataSourceProtocol?
-
-        private let cache: MovieCache
-
-        private let cacheMaxAge:
-            TimeInterval = 60 * 10
-
+    private let cacheMaxAge: TimeInterval = 60 * 10
+    private let localMaxAge: TimeInterval = 60 * 60
 
     init(
-        remoteDataSource:
-            RemoteMovieDataSourceProtocol,
-
-        localDataSource:
-            LocalMovieDataSourceProtocol?,
-
+        remoteDataSource: RemoteMovieDataSourceProtocol,
+        localDataSource: LocalMovieDataSourceProtocol,
         cache: MovieCache
     ) {
-
-        self.remoteDataSource =
-            remoteDataSource
-
-        self.localDataSource =
-            localDataSource
-
+        self.remoteDataSource = remoteDataSource
+        self.localDataSource = localDataSource
         self.cache = cache
     }
 
+    // MARK: - Normal Read
+
     func searchMovies(
         query: String,
         page: Int
-    ) async throws -> MovieSearchResponse {
+    ) async throws -> MovieRepositoryResult {
+
+        let normalizedQuery = normalize(query)
 
         // 1. Memory cache
-        if let cached = await cache.get(
-            query: query,
+        if let response = await cache.get(
+            query: normalizedQuery,
             page: page,
             maxAge: cacheMaxAge
         ) {
-            return cached
+            return MovieRepositoryResult(
+                response: response,
+                source: .memory,
+                isStale: false
+            )
         }
 
-        // 2. Local persistence (skipped when the store is unavailable)
-        let localMovies =
-            try localDataSource?.movies(
-                query: query,
-                page: page
-            ) ?? []
-
-        if !localMovies.isEmpty {
-
-            let response =
-                MovieSearchResponse(
-                    search: localMovies,
-                    totalResults: nil,
-                    response: "True"
-                )
-
-            return response
-        }
-
-        // 3. Network
-        let response =
-            try await remoteDataSource.searchMovies(
-                query: query,
+        // 2. Local persistence
+        if let response = try localDataSource.fetch(
+            query: normalizedQuery,
+            page: page
+        ) {
+            let savedAt = try localDataSource.savedAt(
+                query: normalizedQuery,
                 page: page
             )
 
-        // 4. Save locally
-        try localDataSource?.save(
-            movies: response.search ?? [],
-            query: query,
+            let isStale: Bool
+
+            if let savedAt {
+                isStale =
+                    Date().timeIntervalSince(savedAt) > localMaxAge
+            } else {
+                isStale = true
+            }
+
+            // Promote local data into memory cache.
+            await cache.save(
+                response: response,
+                query: normalizedQuery,
+                page: page
+            )
+
+            return MovieRepositoryResult(
+                response: response,
+                source: .local,
+                isStale: isStale
+            )
+        }
+
+        // 3. Remote API
+        return try await refreshMovies(
+            query: normalizedQuery,
+            page: page
+        )
+    }
+
+    // MARK: - Remote Refresh
+
+    func refreshMovies(
+        query: String,
+        page: Int
+    ) async throws -> MovieRepositoryResult {
+
+        let normalizedQuery = normalize(query)
+
+        let response = try await remoteDataSource.searchMovies(
+            query: normalizedQuery,
             page: page
         )
 
-        // 5. Save memory cache
+        // Save to local persistence.
+        try localDataSource.save(
+            response: response,
+            query: normalizedQuery,
+            page: page
+        )
+
+        // Save to memory cache.
         await cache.save(
             response: response,
-            query: query,
+            query: normalizedQuery,
             page: page
         )
 
-        return response
+        return MovieRepositoryResult(
+            response: response,
+            source: .remote,
+            isStale: false
+        )
+    }
+
+    private func normalize(_ query: String) -> String {
+        query
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
     }
 }

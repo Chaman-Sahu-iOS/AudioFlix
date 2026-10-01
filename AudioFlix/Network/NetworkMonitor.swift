@@ -5,18 +5,17 @@
 //  Created by Chaman Lal Sahu on 01/10/26.
 //
 
-import Foundation
-import Network
 import SwiftUI
 import Combine
+import Foundation
+import Network
 
 @MainActor
 final class NetworkMonitor: ObservableObject {
 
     @Published private(set) var isConnected = true
 
-    private let monitor =
-        NWPathMonitor()
+    private let monitor = NWPathMonitor()
 
     private let queue =
         DispatchQueue(
